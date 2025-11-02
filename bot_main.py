@@ -216,8 +216,8 @@ async def report_help(m: types.Message):
         parse_mode="Markdown"
     )
 
-@rt.message(F.text == "🎯 Завдання")
 @rt.message(Command("quest"))
+@rt.message(F.text.contains("Завдання"))
 async def give_quest(m: types.Message):
     uid = str(m.from_user.id)
     ensure_user(m.from_user.id, m.from_user)
@@ -540,6 +540,7 @@ app.on_shutdown.append(on_shutdown)
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
     web.run_app(app, host="0.0.0.0", port=port)
+
 
 
 
