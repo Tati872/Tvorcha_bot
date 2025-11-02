@@ -180,12 +180,12 @@ async def start_cmd(m: types.Message):
 
 @rt.message(F.text == "🎮 Ігри")
 async def show_games(m: types.Message):
-    await m.reply("Активна гра: Таємниці Ниток.\nОплати участь та надсилай звіти.", parse_mode="Markdown")
+    await m.answer("Активна гра: Таємниці Ниток.\nОплати участь та надсилай звіти.", parse_mode="Markdown")
 
 @rt.message(F.text == "💳 Оплата")
 @rt.message(Command("pay", "оплата"))
 async def pay_info(m: types.Message):
-    await m.reply(
+    await m.answer(
         f"💳 Оплата участі — {PRICE} грн\n"
         f"Картка: {PAYMENT_CARD}\n"
         f"Після оплати — надішли скриншот у цей чат. Я передам адміну ✅",
@@ -200,16 +200,16 @@ async def my_status(m: types.Message):
     reg = db["registrations"].get(uid)
     if reg and reg.get("approved"):
         t_index = db["progress"][uid]["current"]
-        await m.reply(f"✅ Ти у грі {game_name('x')}. Поточне завдання: #{t_index}", parse_mode="Markdown")
+        await m.answer(f"✅ Ти у грі {game_name('x')}. Поточне завдання: #{t_index}", parse_mode="Markdown")
     elif uid in db["pending"]:
-        await m.reply("⏳ Заявка очікує підтвердження адміністратором.")
+        await m.answer("⏳ Заявка очікує підтвердження адміністратором.")
     else:
-        await m.reply("ℹ Ти ще не реєструвалася. Надішли скрин оплати після «💳 Оплата».")
+        await m.answer("ℹ Ти ще не реєструвалася. Надішли скрин оплати після «💳 Оплата».")
 
 @rt.message(F.text == "📸 Звіт")
 @rt.message(Command("report"))
 async def report_help(m: types.Message):
-    await m.reply(
+    await m.answer(
         "📸 Формат підпису до фото-звіту:\n"
         "звіт: старт 520  або  звіт: фініш 840\n(дозволено 300–1200 стібків).\n"
         "Після фінішу нове завдання приходить одразу, а адмін перевіряє пізніше.",
@@ -223,12 +223,12 @@ async def give_quest(m: types.Message):
     ensure_user(m.from_user.id, m.from_user)
     cur = db["progress"][uid]["current"]
     if cur > len(TASKS):
-        await m.reply("🏁 Фінал! Усі завдання виконано. Ти — Майстриня Осердя ✨")
+        await m.answer("🏁 Фінал! Усі завдання виконано. Ти — Майстриня Осердя ✨")
         return
     t = TASKS[cur - 1]
     stitches = apply_artifact_effects_on_next(uid, t["stitches"])
     card = {**t, "stitches": stitches}
-    await m.reply(task_card(card), parse_mode="Markdown")
+    await m.answer(task_card(card), parse_mode="Markdown")
 
 @rt.message(F.text == "🎲 Кинути кубик")
 @rt.message(Command("roll"))
@@ -237,11 +237,11 @@ async def do_roll(m: types.Message):
     ensure_user(m.from_user.id, m.from_user)
     cur = db["progress"][uid]["current"]
     if cur > len(TASKS):
-        await m.reply("Гра завершена. Кубик більше не впливає ✨")
+        await m.answer("Гра завершена. Кубик більше не впливає ✨")
         return
     t = TASKS[cur - 1]
     if not t.get("dice_event"):
-        await m.reply("На цьому етапі доля спить. Кубик не потрібен 🙂")
+        await m.answer("На цьому етапі доля спить. Кубик не потрібен 🙂")
         return
 
     val = roll_dice(uid)
@@ -265,7 +265,7 @@ async def do_roll(m: types.Message):
         text += f"\n🎁 Випав артефакт: {name}"
 
     save_db(db)
-    await m.reply(text, parse_mode="Markdown")
+    await m.answer(text, parse_mode="Markdown")
 
 @rt.message(F.text == "🎒 Інвентар")
 @rt.message(Command("bag"))
@@ -273,13 +273,13 @@ async def show_bag(m: types.Message):
     uid = str(m.from_user.id)
     inv = db["inventory"].get(uid, {})
     if not inv:
-        await m.reply("🎒 Порожньо. Артефакти ще не знайдені.")
+        await m.answer("🎒 Порожньо. Артефакти ще не знайдені.")
         return
     lines = ["🎒 Твої артефакти:"]
     for code, count in inv.items():
         meta = ARTIFACTS.get(code, {"name": code, "effect": ""})
         lines.append(f"• {meta['name']} ×{count} — {meta.get('effect','')}")
-    await m.reply("\n".join(lines), parse_mode="Markdown")
+    await m.answer("\n".join(lines), parse_mode="Markdown")
 
 @rt.message(F.text == "📊 Моя статистика")
 @rt.message(Command("mystats"))
@@ -287,11 +287,11 @@ async def mystats(m: types.Message):
     uid = str(m.from_user.id)
     s = db["stats"].get(uid)
     if not s:
-        await m.reply("Поки що немає статистики. Надішли хоч один звіт 🧵")
+        await m.answer("Поки що немає статистики. Надішли хоч один звіт 🧵")
         return
     debt = db["debts"].get(uid, 0)
     cur = db["progress"][uid]["current"]
-    await m.reply(
+    await m.answer(
         "📊 Твоя статистика\n"
         f"Звіти: {s.get('reports', 0)}\n"
         f"Сумарно стібків: {s.get('stitches_total', 0)}\n"
@@ -315,7 +315,7 @@ async def on_photo(m: types.Message):
         kind = kind.lower()
         stitches = int(stitches)
         if stitches < 300 or stitches > 1200:
-            await m.reply("⚠ Дозволено 300–1200 стібків за один звіт.")
+            await m.answer("⚠ Дозволено 300–1200 стібків за один звіт.")
             return
 
         # В адмін-групу
@@ -331,7 +331,7 @@ async def on_photo(m: types.Message):
         kb.button(text="⚠ Кара",       callback_data=f"punish|{uid}")
         kb.adjust(3)
         await bot.send_photo(ADMIN_CHAT_ID, m.photo[-1].file_id, caption=cap, reply_markup=kb.as_markup())
-        await m.reply("🧾 Звіт надіслано адміну. Дякую!")
+        await m.answer("🧾 Звіт надіслано адміну. Дякую!")
 
         # Автовидача наступного завдання після ФІНІШ
         if kind == "фініш":
@@ -349,12 +349,12 @@ async def on_photo(m: types.Message):
                     base = max(50, base - take)
 
                 save_db(db)
-                await m.reply("🎯 Наступне завдання:", parse_mode=None)
-                await m.reply(task_card({**t, "stitches": base}), parse_mode="Markdown")
+                await m.answer("🎯 Наступне завдання:", parse_mode=None)
+                await m.answer(task_card({**t, "stitches": base}), parse_mode="Markdown")
                 db["progress"][uid]["current"] = cur + 1
                 save_db(db)
             else:
-                await m.reply("🏁 Фінал! Усі завдання виконано. Ти — Майстриня Осердя ✨")
+                await m.answer("🏁 Фінал! Усі завдання виконано. Ти — Майстриня Осердя ✨")
         return
 
     # --- Скрин оплати ---
@@ -374,7 +374,7 @@ async def on_photo(m: types.Message):
     kb.button(text="❌ Відхилити",          callback_data=f"declpay|{uid}")
     kb.adjust(2)
     await bot.send_photo(ADMIN_CHAT_ID, m.photo[-1].file_id, caption=cap, reply_markup=kb.as_markup())
-    await m.reply("✅ Скрин відправлено адміну. Статус дивись у «🧵 Статус»")
+    await m.answer("✅ Скрин відправлено адміну. Статус дивись у «🧵 Статус»")
 
 # ================== ДІЇ АДМІНА (callback) ==================
 @rt.callback_query(F.data.contains("|"))
@@ -447,15 +447,15 @@ async def admin_actions(call: types.CallbackQuery):
 # ================== ДІАГНОСТИКА ==================
 @rt.message(Command("id"))
 async def show_id(m: types.Message):
-    await m.reply(f"chat_id: {m.chat.id}")
+    await m.answer(f"chat_id: {m.chat.id}")
 
 @rt.message(Command("test_admin"))
 async def test_admin(m: types.Message):
     try:
         await bot.send_message(ADMIN_CHAT_ID, f"🔔 Тест від {m.from_user.first_name} (id {m.from_user.id})")
-        await m.reply("✅ Надіслав тест у адмін-групу")
+        await m.answer("✅ Надіслав тест у адмін-групу")
     except Exception as e:
-        await m.reply(f"❌ Не зміг надіслати в адмін-групу: {e}")
+        await m.answer(f"❌ Не зміг надіслати в адмін-групу: {e}")
 
 # ================== WEBHOOK для Render ==================
 async def handle_webhook(request: web.Request):
@@ -540,6 +540,7 @@ app.on_shutdown.append(on_shutdown)
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
     web.run_app(app, host="0.0.0.0", port=port)
+
 
 
 
