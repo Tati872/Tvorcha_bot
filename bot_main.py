@@ -462,7 +462,7 @@ async def handle_webhook(request: web.Request):
     try:
         data = await request.json()
         update = types.Update(**data)
-        await dp.process_update(update)
+        await dp.feed_update(bot, update)
         return web.Response(text="ok")
     except Exception as e:
         logging.exception(f"Webhook handle error: {e}")
@@ -506,7 +506,7 @@ async def handle_webhook(request: web.Request):
         data = await request.json()
         logging.info(f"⬇ update: {data.get('update_id')} {list(data.keys())}")
         update = types.Update(**data)
-        await dp.process_update(update)
+        await dp.feed_update(bot, update)
         return web.Response(text="ok")
     except Exception as e:
         logging.exception(f"Webhook handle error: {e}")
@@ -540,6 +540,7 @@ app.on_shutdown.append(on_shutdown)
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
     web.run_app(app, host="0.0.0.0", port=port)
+
 
 
 
