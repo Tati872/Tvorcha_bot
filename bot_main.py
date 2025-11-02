@@ -1,39 +1,56 @@
-import os, json, re, logging, asyncio, random
+# bot_main.py
+import os
+import re
+import json
+import random
+import logging
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher, Router, F, types
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import (
-    ReplyKeyboardMarkup, KeyboardButton,
-)
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from aiohttp import web
 
 # ================== НАЛАШТУВАННЯ ==================
-BOT_TOKEN         = os.getenv("BOT_TOKEN", "8260944061:AAE_LWhH1UMwVhZSy0WK0ZEoDFGnlItdsgs")
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "-1003202544470"))
-PAYMENT_CARD  = os.getenv("PAYMENT_CARD", "4441 1110 3900 4548")
-DB_FILE       = os.getenv("DB_FILE_PATH", "./game_db.json")
-QUESTS_FILE   = os.getenv("QUESTS_FILE", "./quests_tayemnyci_150.json")
+logging.basicConfig(level=logging.INFO)
+
+BOT_TOKEN     = os.getenv("BOT_TOKEN", "").strip()
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "-1000000000000"))
+PAYMENT_CARD  = os.getenv("PAYMENT_CARD", "4441 1110 3900 4548").strip()
+DB_FILE       = os.getenv("DB_FILE_PATH", "./game_db.json").strip()
+QUESTS_FILE   = os.getenv("QUESTS_FILE", "./quests_tayemnyci_150.json").strip()
 PRICE         = 100
 
-logging.basicConfig(level=logging.INFO)
-bot = Bot(TOKEN)
+if not BOT_TOKEN:
+    raise RuntimeError("Environment BOT_TOKEN is missing")
+
+bot = Bot(BOT_TOKEN)
 dp  = Dispatcher(storage=MemoryStorage())
 rt  = Router()
 dp.include_router(rt)
 
 random.seed(42)
 
-# ================== ЧИТАЄМО ГРУ ==================
+# ================== ДАНІ ГРИ ==================
+def _empty_db():
+    return {
+        "pending": {},
+        "registrations": {},
+        "stats": {},
+        "progress": {},
+        "inventory": {},
+        "debts": {}
+    }
+
 def load_db():
     try:
         if not os.path.exists(DB_FILE):
-            return {"pending": {}, "registrations": {}, "stats": {}, "progress": {}, "inventory": {}, "debts": {}}
+            return _empty_db()
         with open(DB_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
-        return {"pending": {}, "registrations": {}, "stats": {}, "progress": {}, "inventory": {}, "debts": {}}
+        return _empty_db()
 
 def save_db(db):
     os.makedirs(os.path.dirname(DB_FILE) or ".", exist_ok=True)
@@ -41,28 +58,64 @@ def save_db(db):
         json.dump(db, f, ensure_ascii=False, indent=2)
 
 def load_quests():
-    with open(QUESTS_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data
+    # очікуємо структуру:
+    # { "tasks":[{id,title,text,stitches,tech,color,keyword,dice_event?}], "artifacts":[{code,name,effect}], "dice_outcomes":[{value,effect}] }
+    if os.path.exists(QUESTS_FILE):
+        with open(QUESTS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    # fallback мінімальний набір, щоб не впасти
+    return {
+        "tasks": [
+            {
+                "id": 1,
+                "title": "Перший стібок",
+                "text": "Зроби 400 стібків у будь-якому процесі.",
+                "stitches": 400,
+                "tech": "хрестик",
+                "color": "вільно",
+                "keyword": "#СТАРТ_1",
+                "dice_event": True
+            }
+        ],
+        "artifacts": [
+            {"code": "amulet_light",  "name": "Амулет Світла",  "effect": "-100 стібків у наступному завданні"},
+            {"code": "bead_luck",     "name": "Бісер Удачі",   "effect": "Кращий шанс на 5–6 під час кидка"},
+            {"code": "scissors_fate", "name": "Ножиці Долі",   "effect": "Разове зняття кари/штрафу"}
+        ],
+        "dice_outcomes": [
+            {"value": 1, "effect": "+100 борг стібків"},
+            {"value": 2, "effect": "+50 борг стібків"},
+            {"value": 3, "effect": "нічого не відбулося"},
+            {"value": 4, "effect": "нічого не відбулося"},
+            {"value": 5, "effect": "шанс на артефакт або -100 стібків у наступному"},
+            {"value": 6, "effect": "гарантований артефакт"}
+        ]
+    }
 
 db = load_db()
 quests = load_quests()
-TASKS = quests["tasks"]
-ARTIFACTS = {a["code"]: a for a in quests["artifacts"]}
-DICE = quests["dice_outcomes"]
 
-# ================== КОРИСНЕ ==================
+TASKS      = quests.get("tasks", [])
+ARTIFACTS  = {a["code"]: a for a in quests.get("artifacts", [])}
+DICE_TABLE = quests.get("dice_outcomes", [])
+
+# ================== КОРИСНІ ФУНКЦІЇ ==================
 def ensure_user(uid: int, user: types.User):
     suid = str(uid)
-    db["stats"].setdefault(suid, {"name": user.first_name, "username": user.username, "reports": 0, "stitches_total": 0})
+    db["stats"].setdefault(suid, {
+        "name": user.first_name,
+        "username": user.username,
+        "reports": 0,
+        "stitches_total": 0
+    })
     db["progress"].setdefault(suid, {"current": 1, "history": []})
     db["inventory"].setdefault(suid, {})
     db["debts"].setdefault(suid, 0)
 
-def game_name(code: str) -> str:
+def game_name(_: str) -> str:
     return "Таємниці Ниток"
 
-def main_menu() -> ReplyKeyboardMarkup:
+def main_menu():
     kb = ReplyKeyboardBuilder()
     kb.button(text="🎮 Ігри")
     kb.button(text="💳 Оплата")
@@ -76,64 +129,66 @@ def main_menu() -> ReplyKeyboardMarkup:
     return kb.as_markup(resize_keyboard=True)
 
 def task_card(t):
-    return (f"*Завдання #{t['id']} — {t['title']}*\n"
-            f"{t['text']}\n"
-            f"🧵 Стібків: {t['stitches']} | Техніка: {t['tech']} | Колір: {t['color']}\n"
-            f"🔑 Ключове слово: {t['keyword']}"
-            + ("" if not t.get("dice_event") else "\n🎲 Подія: кидок кубика доступний."))
+    base = [
+        f"Завдання #{t['id']} — {t['title']}",
+        t['text'],
+        f"🧵 Стібків: {t['stitches']} | Техніка: {t['tech']} | Колір: {t['color']}",
+        f"🔑 Ключове слово: {t['keyword']}"
+    ]
+    if t.get("dice_event"):
+        base.append("🎲 Подія: на цьому етапі доступний кидок кубика.")
+    return "\n".join(base)
 
-def grant_artifact(uid: str, code: str) -> str:
-    inv = db["inventory"].setdefault(uid, {})
+def grant_artifact(suid: str, code: str) -> str:
+    if code not in ARTIFACTS:
+        return "Невідомий артефакт"
+    inv = db["inventory"].setdefault(suid, {})
     inv[code] = inv.get(code, 0) + 1
     save_db(db)
     return ARTIFACTS[code]["name"]
 
-def apply_artifact_effects_on_next(uid: str, base_stitches: int) -> int:
-    """Амулет Світла зменшує на 100 і згорає."""
-    inv = db["inventory"].setdefault(uid, {})
+def apply_artifact_effects_on_next(suid: str, base_stitches: int) -> int:
+    # Амулет Світла: -100 стібків у наступному завданні, потім згорає
+    inv = db["inventory"].setdefault(suid, {})
     if inv.get("amulet_light", 0) > 0:
         inv["amulet_light"] -= 1
-        if inv["amulet_light"] <= 0: inv.pop("amulet_light", None)
+        if inv["amulet_light"] <= 0:
+            inv.pop("amulet_light", None)
         save_db(db)
         return max(100, base_stitches - 100)
     return base_stitches
 
-def roll_dice(uid: str) -> dict:
-    # bead_luck збільшує шанс хороших результатів 5-6
-    inv = db["inventory"].setdefault(uid, {})
+def roll_dice(suid: str) -> int:
+    # Бісер Удачі злегка зсуває шанс у бік 5–6
+    inv = db["inventory"].setdefault(suid, {})
     bias = 0.0
     if inv.get("bead_luck", 0) > 0:
-        bias = 0.1
+        bias = 0.10
     r = random.random()
-    if r < (1/6 - bias/2): val = 1
-    elif r < (2/6 - bias/2): val = 2
-    elif r < (3/6): val = 3
-    elif r < (4/6): val = 4
-    elif r < (5/6 + bias/2): val = 5
-    else: val = 6
-    return {"value": val}
+    if r < (1/6 - bias/2): return 1
+    if r < (2/6 - bias/2): return 2
+    if r < (3/6):          return 3
+    if r < (4/6):          return 4
+    if r < (5/6 + bias/2): return 5
+    return 6
 
-# ================== МЕНЮ / КОМАНДИ ==================
+# ================== ХЕНДЛЕРИ МЕНЮ ==================
 @rt.message(Command("start"))
 async def start_cmd(m: types.Message):
-    await m.answer(
-        "Привіт! 🧶 Я бот творчої бджілки.\n"
-        "Вибери дію в меню нижче 👇",
-        reply_markup=main_menu()
-    )
+    ensure_user(m.from_user.id, m.from_user)
+    await m.answer("Привіт! 🧶 Я бот творчої бджілки. Обери дію нижче 👇", reply_markup=main_menu())
 
 @rt.message(F.text == "🎮 Ігри")
 async def show_games(m: types.Message):
-    await m.reply("Поки активна головна гра: Таємниці Ниток. Зареєструйся через «💳 Оплата» та шли звіти.",
-                  parse_mode="Markdown")
+    await m.reply("Активна гра: Таємниці Ниток.\nОплати участь та надсилай звіти.", parse_mode="Markdown")
 
 @rt.message(F.text == "💳 Оплата")
-@rt.message(Command("pay","оплата"))
+@rt.message(Command("pay", "оплата"))
 async def pay_info(m: types.Message):
     await m.reply(
-        "💳 Оплата участі — 100 грн\n"
+        f"💳 Оплата участі — {PRICE} грн\n"
         f"Картка: {PAYMENT_CARD}\n"
-        "Після оплати — надішли скриншот у цей чат. Я передам адміну ✅",
+        f"Після оплати — надішли скриншот у цей чат. Я передам адміну ✅",
         parse_mode="Markdown"
     )
 
@@ -145,19 +200,19 @@ async def my_status(m: types.Message):
     reg = db["registrations"].get(uid)
     if reg and reg.get("approved"):
         t_index = db["progress"][uid]["current"]
-        await m.reply(f"✅ Ви у грі {game_name('x')}. Поточне завдання: #{t_index}")
+        await m.reply(f"✅ Ти у грі {game_name('x')}. Поточне завдання: #{t_index}", parse_mode="Markdown")
     elif uid in db["pending"]:
         await m.reply("⏳ Заявка очікує підтвердження адміністратором.")
     else:
-        await m.reply("ℹ Ви ще не реєструвалися. Просто шліть скрин оплати після «💳 Оплата».")
+        await m.reply("ℹ Ти ще не реєструвалася. Надішли скрин оплати після «💳 Оплата».")
 
 @rt.message(F.text == "📸 Звіт")
 @rt.message(Command("report"))
 async def report_help(m: types.Message):
     await m.reply(
         "📸 Формат підпису до фото-звіту:\n"
-        "звіт: старт 520 або звіт: фініш 840 (дозволено 300–1200).\n"
-        "Після фінішу нове завдання прийде одразу, а адмін перевірить пізніше.",
+        "звіт: старт 520  або  звіт: фініш 840\n(дозволено 300–1200 стібків).\n"
+        "Після фінішу нове завдання приходить одразу, а адмін перевіряє пізніше.",
         parse_mode="Markdown"
     )
 
@@ -168,11 +223,12 @@ async def give_quest(m: types.Message):
     ensure_user(m.from_user.id, m.from_user)
     cur = db["progress"][uid]["current"]
     if cur > len(TASKS):
-        await m.reply("🏁 Фінал! Усі 150 завдань виконано. Ти — Майстриня Осердя ✨")
+        await m.reply("🏁 Фінал! Усі завдання виконано. Ти — Майстриня Осердя ✨")
         return
-    t = TASKS[cur-1]
+    t = TASKS[cur - 1]
     stitches = apply_artifact_effects_on_next(uid, t["stitches"])
-    await m.reply(task_card({**t, "stitches": stitches}), parse_mode="Markdown")
+    card = {**t, "stitches": stitches}
+    await m.reply(task_card(card), parse_mode="Markdown")
 
 @rt.message(F.text == "🎲 Кинути кубик")
 @rt.message(Command("roll"))
@@ -183,34 +239,28 @@ async def do_roll(m: types.Message):
     if cur > len(TASKS):
         await m.reply("Гра завершена. Кубик більше не впливає ✨")
         return
-    t = TASKS[cur-1]
+    t = TASKS[cur - 1]
     if not t.get("dice_event"):
         await m.reply("На цьому етапі доля спить. Кубик не потрібен 🙂")
         return
 
-    # перевір артефакт на повторний кидок
-    inv = db["inventory"].setdefault(uid, {})
-    used_needle = False
+    val = roll_dice(uid)
+    note = next((d["effect"] for d in DICE_TABLE if d.get("value") == val), "—")
+    text = f"🎲 Кубик: {val} → {note}"
 
-    res = roll_dice(uid)
-    value = res["value"]
-    note = next((d["effect"] for d in DICE if d["value"]==value), "—")
-    text = f"🎲 Кубик: {value} → {note}"
-
-    # ефекти
-    if value in (1,2):
-        add = 100 if value==1 else 50
+    if val in (1, 2):
+        add = 100 if val == 1 else 50
         db["debts"][uid] = db["debts"].get(uid, 0) + add
-        text += f"\n📌 Додано борг: +{add} стібків (погашується автоматично з наступних завдань)."
-    elif value == 5:
-        if random.random() < 0.10:
+        text += f"\n📌 Додано борг: +{add} стібків (погашення з наступних завдань)."
+    elif val == 5:
+        # 10% артефакт, інакше тимчасовий -100
+        if random.random() < 0.10 and ARTIFACTS:
             name = grant_artifact(uid, random.choice(list(ARTIFACTS.keys())))
             text += f"\n🎁 Випав артефакт: {name}"
         else:
-            text += "\n🎁 Бонус: -100 стібків до наступного завдання."
-            # реалізуємо як тимчасовий амулет
             grant_artifact(uid, "amulet_light")
-    elif value == 6:
+            text += "\n🎁 Бонус: -100 стібків до наступного завдання."
+    elif val == 6 and ARTIFACTS:
         name = grant_artifact(uid, random.choice(list(ARTIFACTS.keys())))
         text += f"\n🎁 Випав артефакт: {name}"
 
@@ -226,8 +276,9 @@ async def show_bag(m: types.Message):
         await m.reply("🎒 Порожньо. Артефакти ще не знайдені.")
         return
     lines = ["🎒 Твої артефакти:"]
-    for code,count in inv.items():
-        lines.append(f"• {ARTIFACTS[code]['name']} ×{count} — {ARTIFACTS[code]['effect']}")
+    for code, count in inv.items():
+        meta = ARTIFACTS.get(code, {"name": code, "effect": ""})
+        lines.append(f"• {meta['name']} ×{count} — {meta.get('effect','')}")
     await m.reply("\n".join(lines), parse_mode="Markdown")
 
 @rt.message(F.text == "📊 Моя статистика")
@@ -241,15 +292,14 @@ async def mystats(m: types.Message):
     debt = db["debts"].get(uid, 0)
     cur = db["progress"][uid]["current"]
     await m.reply(
-        f"📊 Твоя статистика\n"
-        f"Звіти: {s.get('reports',0)}\n"
-        f"Сумарно стібків: {s.get('stitches_total',0)}\n"
-        f"Поточне завдання: #{cur if cur<=len(TASKS) else 'фінал'}\n"
-        f"Борг стібків: {debt}",
-        parse_mode="Markdown"
+        "📊 Твоя статистика\n"
+        f"Звіти: {s.get('reports', 0)}\n"
+        f"Сумарно стібків: {s.get('stitches_total', 0)}\n"
+        f"Поточне завдання: #{cur if cur <= len(TASKS) else 'фінал'}\n"
+        f"Борг стібків: {debt}"
     )
 
-# ================== ФОТО (ОПЛАТА/ЗВІТ) ==================
+# ================== ФОТО: ЗВІТИ ТА ОПЛАТА ==================
 REPORT_RE = re.compile(r"^\s*звіт\s*:\s*(старт|фініш)\s+(\d+)\s*$", re.I)
 
 @rt.message(F.photo)
@@ -258,22 +308,23 @@ async def on_photo(m: types.Message):
     ensure_user(m.from_user.id, m.from_user)
     caption = (m.caption or "").strip()
 
-    # ----- Фото-звіт -----
-    if REPORT_RE.search(caption):
-        kind, stitches = REPORT_RE.search(caption).groups()
+    # --- Фото-звіт ---
+    mreport = REPORT_RE.search(caption)
+    if mreport:
+        kind, stitches = mreport.groups()
         kind = kind.lower()
         stitches = int(stitches)
         if stitches < 300 or stitches > 1200:
             await m.reply("⚠ Дозволено 300–1200 стібків за один звіт.")
             return
 
-        # зафіксуємо звіт у статистиці ТИМЧАСОВО (лише кількість звітів росте після підтвердження)
-        # тут просто відправляємо в адмін, а гравчині даємо НАСТУПНЕ завдання одразу, як ти просила
-        # 1) Надсилаємо в адмін-групу з кнопками
-        cap = (f"📜 Фото-звіт\n"
-               f"👤 {m.from_user.first_name} (@{m.from_user.username or '—'}) | ID {uid}\n"
-               f"📌 Тип: {kind}\n"
-               f"🧵 Стібків: {stitches}")
+        # В адмін-групу
+        cap = (
+            f"📜 Фото-звіт\n"
+            f"👤 {m.from_user.first_name} (@{m.from_user.username or '—'}) | ID {uid}\n"
+            f"📌 Тип: {kind}\n"
+            f"🧵 Стібків: {stitches}"
+        )
         kb = InlineKeyboardBuilder()
         kb.button(text="✅ Зарахувати", callback_data=f"okrep|{uid}|{kind}|{stitches}")
         kb.button(text="❌ Відхилити",  callback_data=f"badrep|{uid}")
@@ -282,41 +333,42 @@ async def on_photo(m: types.Message):
         await bot.send_photo(ADMIN_CHAT_ID, m.photo[-1].file_id, caption=cap, reply_markup=kb.as_markup())
         await m.reply("🧾 Звіт надіслано адміну. Дякую!")
 
-        # 2) Якщо це фініш — видати наступне завдання ОДРАЗУ
+        # Автовидача наступного завдання після ФІНІШ
         if kind == "фініш":
-            # перекриваємо борг стібків із майбутніх завдань автоматично
-            # (борг віднімається по 50/100 за крок — спростимо: знімемо одразу з наступного)
             cur = db["progress"][uid]["current"]
             if cur <= len(TASKS):
-                t = TASKS[cur-1]
+                t = TASKS[cur - 1]
                 base = t["stitches"]
-                # застосувати амулет та борг
+
+                # Амулет / борг
                 base = apply_artifact_effects_on_next(uid, base)
                 debt = db["debts"].get(uid, 0)
                 if debt > 0:
-                    take = min(debt, base//2)  # не більше половини завдання
+                    take = min(debt, base // 2)   # не більше половини
                     db["debts"][uid] = debt - take
                     base = max(50, base - take)
+
                 save_db(db)
                 await m.reply("🎯 Наступне завдання:", parse_mode=None)
                 await m.reply(task_card({**t, "stitches": base}), parse_mode="Markdown")
                 db["progress"][uid]["current"] = cur + 1
                 save_db(db)
             else:
-                await m.reply("🏁 Фінал! Усі 150 завдань виконано. Ти — Майстриня Осердя ✨")
+                await m.reply("🏁 Фінал! Усі завдання виконано. Ти — Майстриня Осердя ✨")
         return
 
-    # ----- Скрин оплати -----
+    # --- Скрин оплати ---
     reg = db["registrations"].get(uid)
     if not reg:
-        # ще не додані — створимо pending
         db["pending"][uid] = {"game": "tayemnyci", "requested_at": datetime.now().isoformat(timespec="seconds")}
         save_db(db)
 
-    cap = (f"💳 Скриншот оплати\n"
-           f"👤 {m.from_user.first_name} (@{m.from_user.username or '—'}) | ID {uid}\n"
-           f"🎮 Гра: {game_name('x')}\n"
-           f"💳 Картка: {PAYMENT_CARD}")
+    cap = (
+        f"💳 Скриншот оплати\n"
+        f"👤 {m.from_user.first_name} (@{m.from_user.username or '—'}) | ID {uid}\n"
+        f"🎮 Гра: {game_name('x')}\n"
+        f"💳 Картка: {PAYMENT_CARD}"
+    )
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Підтвердити оплату", callback_data=f"apprpay|{uid}")
     kb.button(text="❌ Відхилити",          callback_data=f"declpay|{uid}")
@@ -324,60 +376,70 @@ async def on_photo(m: types.Message):
     await bot.send_photo(ADMIN_CHAT_ID, m.photo[-1].file_id, caption=cap, reply_markup=kb.as_markup())
     await m.reply("✅ Скрин відправлено адміну. Статус дивись у «🧵 Статус»")
 
-# ================== ДІЇ АДМІНА ==================
+# ================== ДІЇ АДМІНА (callback) ==================
 @rt.callback_query(F.data.contains("|"))
 async def admin_actions(call: types.CallbackQuery):
     if call.message.chat.id != ADMIN_CHAT_ID:
         await call.answer("Кнопки діють лише в адмін-групі", show_alert=True)
         return
+
     parts = call.data.split("|")
     action = parts[0]
+
     try:
-        if action in ("apprpay","declpay"):
+        if action in ("apprpay", "declpay"):
             _, uid = parts
             if action == "apprpay":
-                db["registrations"][uid] = {"game":"tayemnyci", "approved": True, "approved_at": datetime.now().isoformat(timespec="seconds")}
+                db["registrations"][uid] = {
+                    "game": "tayemnyci",
+                    "approved": True,
+                    "approved_at": datetime.now().isoformat(timespec="seconds")
+                }
                 db["pending"].pop(uid, None)
                 save_db(db)
-                await bot.send_message(int(uid), f"🎉 Оплату підтверджено! Стартуй у «🎯 Завдання».", parse_mode="Markdown")
+                await bot.send_message(int(uid), "🎉 Оплату підтверджено! Стартуй у «🎯 Завдання».")
             else:
-                db["pending"].pop(uid, None); save_db(db)
-                await bot.send_message(int(uid), "❌ Оплату не підтверджено. Спробуй ще раз або напиши адміну.")
-            await call.message.edit_reply_markup(reply_markup=None); await call.answer("ОК")
+                db["pending"].pop(uid, None)
+                save_db(db)
+                await bot.send_message(int(uid), "❌ Оплату не підтверджено. Спробуй ще або напиши адміну.")
+            await call.message.edit_reply_markup(reply_markup=None)
+            await call.answer("ОК")
 
         elif action == "okrep":
             _, uid, kind, stitches = parts
             stitches = int(stitches)
-            # підтверджуємо статистику
-            db["stats"].setdefault(uid, {"name":"", "username":"", "reports":0, "stitches_total":0})
-            db["stats"][uid]["reports"]        = db["stats"][uid].get("reports",0) + 1
-            db["stats"][uid]["stitches_total"] = db["stats"][uid].get("stitches_total",0) + stitches
+            db["stats"].setdefault(uid, {"name": "", "username": "", "reports": 0, "stitches_total": 0})
+            db["stats"][uid]["reports"]        = db["stats"][uid].get("reports", 0) + 1
+            db["stats"][uid]["stitches_total"] = db["stats"][uid].get("stitches_total", 0) + stitches
             save_db(db)
             await bot.send_message(int(uid), f"✅ Зараховано {stitches} стібків ({kind}). Молодчинка! 🧵")
-            await call.message.edit_reply_markup(reply_markup=None); await call.answer("ОК")
+            await call.message.edit_reply_markup(reply_markup=None)
+            await call.answer("ОК")
 
         elif action == "badrep":
             _, uid = parts
-            # штраф або борг; scissors_fate може зняти
             debt_add = 150
             inv = db["inventory"].setdefault(uid, {})
-            if inv.get("scissors_fate",0)>0:
+            if inv.get("scissors_fate", 0) > 0:
                 inv["scissors_fate"] -= 1
-                if inv["scissors_fate"]<=0: inv.pop("scissors_fate",None)
+                if inv["scissors_fate"] <= 0:
+                    inv.pop("scissors_fate", None)
                 msg = "✂ Кара знята ножицями долі. Штраф не накладено."
             else:
-                db["debts"][uid] = db["debts"].get(uid,0) + debt_add
-                msg = f"⚠ Звіт відхилено. Накладено борг: +{debt_add} стібків, знімемо з наступних завдань."
+                db["debts"][uid] = db["debts"].get(uid, 0) + debt_add
+                msg = f"⚠ Звіт відхилено. Накладено борг: +{debt_add} стібків."
             save_db(db)
             await bot.send_message(int(uid), msg)
-            await call.message.edit_reply_markup(reply_markup=None); await call.answer("ОК")
+            await call.message.edit_reply_markup(reply_markup=None)
+            await call.answer("ОК")
 
         elif action == "punish":
             _, uid = parts
-            db["debts"][uid] = db["debts"].get(uid,0) + 200
+            db["debts"][uid] = db["debts"].get(uid, 0) + 200
             save_db(db)
-            await bot.send_message(int(uid), "🕯 Містична кара: +200 боргу стібків. Спокутуй у наступних завданнях.")
-            await call.message.edit_reply_markup(reply_markup=None); await call.answer("ОК")
+            await bot.send_message(int(uid), "🕯 Містична кара: +200 боргу стібків.")
+            await call.message.edit_reply_markup(reply_markup=None)
+            await call.answer("ОК")
 
     except Exception as e:
         await call.answer(str(e), show_alert=True)
@@ -395,26 +457,41 @@ async def test_admin(m: types.Message):
     except Exception as e:
         await m.reply(f"❌ Не зміг надіслати в адмін-групу: {e}")
 
-# ================== СТАРТ ==================
-
-from aiogram import types
-from aiohttp import web
-
-async def handle_webhook(request):
-    update = types.Update(**await request.json())
-    await dp.process_update(update)
-    return web.Response()
+# ================== WEBHOOK для Render ==================
+async def handle_webhook(request: web.Request):
+    try:
+        data = await request.json()
+        update = types.Update(**data)
+        await dp.process_update(update)
+        return web.Response(text="ok")
+    except Exception as e:
+        logging.exception(f"Webhook handle error: {e}")
+        return web.Response(status=500, text="error")
 
 app = web.Application()
 app.router.add_post(f"/{BOT_TOKEN}", handle_webhook)
 
-if _name_ == "_main_":
-    import asyncio
-    async def on_startup():
-        webhook_url = "https://tvorcha-bot.onrender.com/" + BOT_TOKEN
-        await bot.set_webhook(webhook_url)
-        print("Webhook set:", webhook_url)
+async def on_startup(app_: web.Application):
+    base_url = os.getenv("RENDER_EXTERNAL_URL", "https://tvorcha-bot.onrender.com")
+    webhook_url = f"{base_url}/{BOT_TOKEN}"
+    await bot.set_webhook(webhook_url)
+    logging.info(f"✅ Webhook set: {webhook_url}")
 
+async def on_shutdown(app_: web.Application):
+    try:
+        await bot.delete_webhook()
+        await bot.session.close()
+    except Exception:
+        pass
+    logging.info("🛑 Webhook removed, bot session closed")
+
+app.on_startup.append(on_startup)
+app.on_shutdown.append(on_shutdown)
+
+if _name_ == "_main_":
+    port = int(os.getenv("PORT", "10000"))
+    web.run_app(app, host="0.0.0.0", port=port)
     asyncio.run(on_startup())
     web.run_app(app, host="0.0.0.0", port=10000)
+
 
