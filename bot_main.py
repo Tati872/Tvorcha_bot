@@ -396,9 +396,24 @@ async def test_admin(m: types.Message):
         await m.reply(f"❌ Не зміг надіслати в адмін-групу: {e}")
 
 # ================== СТАРТ ==================
-async def main():
-    logging.info("🚀 Бот запущений і готовий до гри!")
-    await dp.start_polling(bot)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+from aiogram import types
+from aiohttp import web
+
+async def handle_webhook(request):
+    update = types.Update(**await request.json())
+    await dp.process_update(update)
+    return web.Response()
+
+app = web.Application()
+app.router.add_post(f"/{BOT_TOKEN}", handle_webhook)
+
+if _name_ == "_main_":
+    import asyncio
+    async def on_startup():
+        webhook_url = "https://tvorcha-bot.onrender.com/" + BOT_TOKEN
+        await bot.set_webhook(webhook_url)
+        print("Webhook set:", webhook_url)
+
+    asyncio.run(on_startup())
+    web.run_app(app, host="0.0.0.0", port=10000)
