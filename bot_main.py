@@ -17,9 +17,9 @@ logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN     = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "-1000000000000"))
-PAYMENT_CARD  = os.getenv("PAYMENT_CARD", "4441 1110 3900 4548").strip()
-DB_FILE       = os.getenv("DB_FILE_PATH", "./game_db.json").strip()
-QUESTS_FILE   = os.getenv("QUESTS_FILE", "./quests_tayemnyci_150.json").strip()
+PAYMENT_CARD  = os.getenv("PAYMENT_CARD", "4441 1110 3900 4548")
+DB_FILE       = os.getenv("DB_FILE_PATH", "./game_db.json")
+QUESTS_FILE   = os.getenv("QUESTS_FILE", "./quests_tayemnyci_150.json")
 PRICE         = 100
 
 if not BOT_TOKEN:
@@ -540,6 +540,7 @@ app.on_shutdown.append(on_shutdown)
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
     web.run_app(app, host="0.0.0.0", port=port)
+
 
 
 
