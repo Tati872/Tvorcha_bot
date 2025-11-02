@@ -513,8 +513,8 @@ async def handle_webhook(request: web.Request):
         return web.Response(status=500, text="error")
 
 app = web.Application()
-app.router.add_get("/", handle_health)
 app.router.add_post(f'/{BOT_TOKEN}', handle_webhook)
+app.router.add_get("/", lambda r: web.Response(text="ok"))
 
 async def on_startup(app_: web.Application):
     base_url = os.getenv("RENDER_EXTERNAL_URL", "").strip() or "https://tvorcha-bot.onrender.com"
@@ -540,6 +540,7 @@ app.on_shutdown.append(on_shutdown)
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
     web.run_app(app, host="0.0.0.0", port=port)
+
 
 
 
