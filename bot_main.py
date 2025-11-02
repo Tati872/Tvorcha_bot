@@ -488,10 +488,11 @@ async def on_shutdown(app_: web.Application):
 app.on_startup.append(on_startup)
 app.on_shutdown.append(on_shutdown)
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
     web.run_app(app, host="0.0.0.0", port=port)
     asyncio.run(on_startup())
     web.run_app(app, host="0.0.0.0", port=10000)
+
 
 
