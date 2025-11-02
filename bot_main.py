@@ -186,10 +186,10 @@ async def show_games(m: types.Message):
 @rt.message(Command("pay", "оплата"))
 async def pay_info(m: types.Message):
     await m.answer(
-        f"💳 Оплата участі — {PRICE} грн\n"
-        f"Картка: {PAYMENT_CARD}\n"
+        f"💳 Оплата участі — {PRICE} грн\<br><br>"
+        f"Картка: {PAYMENT_CARD}\<br><br>"
         f"Після оплати — надішли скриншот у цей чат. Я передам адміну ✅",
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 @rt.message(F.text == "🧵 Статус")
@@ -540,6 +540,7 @@ app.on_shutdown.append(on_shutdown)
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
     web.run_app(app, host="0.0.0.0", port=port)
+
 
 
 
