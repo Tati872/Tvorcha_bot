@@ -10,7 +10,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 # ================== НАЛАШТУВАННЯ ==================
-TOKEN         = os.getenv("BOT_TOKEN", "8260944061:AAE_LWhH1UMwVhZSy0WK0ZEoDFGnlItdsgs")
+BOT_TOKEN         = os.getenv("BOT_TOKEN", "8260944061:AAE_LWhH1UMwVhZSy0WK0ZEoDFGnlItdsgs")
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "-1003202544470"))
 PAYMENT_CARD  = os.getenv("PAYMENT_CARD", "4441 1110 3900 4548")
 DB_FILE       = os.getenv("DB_FILE_PATH", "./game_db.json")
@@ -417,3 +417,4 @@ if _name_ == "_main_":
 
     asyncio.run(on_startup())
     web.run_app(app, host="0.0.0.0", port=10000)
+
