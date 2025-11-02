@@ -488,11 +488,59 @@ async def on_shutdown(app_: web.Application):
 app.on_startup.append(on_startup)
 app.on_shutdown.append(on_shutdown)
 
+# ------------------ WEBHOOK ONLY (Render) ------------------
+import os
+import logging
+from aiogram import types
+from aiohttp import web
+
+logging.basicConfig(level=logging.INFO)
+
+# healthcheck (GET) — щоб перевіряти у браузері
+async def handle_health(request: web.Request):
+    return web.Response(text="ok")
+
+# приймаємо апдейти від Telegram (POST)
+async def handle_webhook(request: web.Request):
+    try:
+        data = await request.json()
+        logging.info(f"⬇ update: {data.get('update_id')} {list(data.keys())}")
+        update = types.Update(**data)
+        await dp.process_update(update)
+        return web.Response(text="ok")
+    except Exception as e:
+        logging.exception(f"Webhook handle error: {e}")
+        return web.Response(status=500, text="error")
+
+app = web.Application()
+app.router.add_get("/", handle_health)
+app.router.add_post(f'/{BOT_TOKEN}', handle_webhook)
+
+async def on_startup(app_: web.Application):
+    base_url = os.getenv("RENDER_EXTERNAL_URL", "").strip() or "https://tvorcha-bot.onrender.com"
+    webhook_url = f"{base_url}/{BOT_TOKEN}"
+    try:
+        await bot.delete_webhook(drop_pending_updates=False)
+    except Exception:
+        pass
+    await bot.set_webhook(webhook_url, allowed_updates=["message","callback_query"])
+    logging.info(f"✅ Webhook set: {webhook_url}")
+
+async def on_shutdown(app_: web.Application):
+    try:
+        await bot.delete_webhook()
+        await bot.session.close()
+    except Exception:
+        pass
+    logging.info("🛑 Webhook removed, bot session closed")
+
+app.on_startup.append(on_startup)
+app.on_shutdown.append(on_shutdown)
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
     web.run_app(app, host="0.0.0.0", port=port)
-    asyncio.run(on_startup())
-    web.run_app(app, host="0.0.0.0", port=10000)
+
 
 
 
